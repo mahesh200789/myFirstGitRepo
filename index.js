@@ -6,7 +6,7 @@ const { Pinecone } = require('@pinecone-database/pinecone');
 const { getRelevantChunks } = require('./utils/getRelevantChunks');
 const { sendToWhatsApp } = require('./utils/sendToWhatsApp');
 const app = express();
-
+app.use(express.json());
 app.use(bodyParser.json());
 
 app.get('/', (req, res) => {
