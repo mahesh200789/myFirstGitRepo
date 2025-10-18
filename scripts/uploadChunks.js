@@ -3,79 +3,71 @@ const fs = require('fs');
 const axios = require('axios');
 const { Pinecone } = require('@pinecone-database/pinecone');
 
+// ✅ Initialize Pinecone client
 const pinecone = new Pinecone({
-    apiKey: process.env.PINECONE_API_KEY,
-  //  controllerHostUrl: process.env.PINECONE_HOST_URL
-
+  apiKey: process.env.PINECONE_API_KEY,
+  environment: process.env.PINECONE_ENVIRONMENT
 });
-
 
 const index = pinecone.index('i4-insights');
 
+// ✅ Chunking function
 function chunkText(text, chunkSize = 500) {
-    const chunks = [];
-    for (let i = 0; i < text.length; i += chunkSize) {
-        chunks.push(text.slice(i, i + chunkSize));
-    }
-    return chunks;
+  const chunks = [];
+  for (let i = 0; i < text.length; i += chunkSize) {
+    const chunk = text.slice(i, i + chunkSize).trim();
+    if (chunk.length > 0) chunks.push(chunk);
+  }
+  return chunks;
 }
 
+// ✅ Read KB file
 const rawText = fs.readFileSync('./kb/demo.txt', 'utf-8');
 const chunks = chunkText(rawText);
 
+// ✅ Embed and upload to Pinecone
 async function embedAndUploadChunks(chunks, clientId) {
-    for (let i = 0; i < chunks.length; i++) {
-        const chunk = chunks[i];
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
 
-        // Embed
-        const embeddingResponse = await axios.post(
-            'https://api.openai.com/v1/embeddings',
-            {
-                input: chunk,
-                model: 'text-embedding-3-small'
-            },
-            {
-                headers: {
-                    Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-                    'Content-Type': 'application/json'
-                }
-            }
-        );
+    try {
+      // 🔗 Embed via OpenAI
+      const embeddingResponse = await axios.post(
+        'https://api.openai.com/v1/embeddings',
+        {
+          input: chunk,
+          model: 'text-embedding-3-small'
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
 
-        const embedding = embeddingResponse.data.data[0].embedding;
+      const embedding = embeddingResponse.data.data[0].embedding;
 
-        console.log('Embedding type:', typeof embedding);
-        console.log('Is array:', Array.isArray(embedding));
-        console.log('Length:', embedding.length);
+      // 🧠 Upsert to Pinecone
+      await index.upsert([
+        {
+          id: `${clientId}-chunk-${i}-${Date.now()}`,
+          values: embedding,
+          metadata: {
+            client_id: clientId,
+            text: chunk
+          }
+        }
+      ]);
 
-
-        // Upsert
-        // await index.upsert({
-        //     vectors: [
-        //         {
-        //             id: `${clientId}-chunk-${i}`,
-        //             values: embedding,
-        //             metadata: {
-        //                 client_id: clientId,
-        //                 text: chunk
-        //             }
-        //         }
-        //     ]
-        // });
-        await index.upsert([
-            {
-                id: `${clientId}-chunk-${i}`,
-                values: embedding,
-                metadata: {
-                    client_id: clientId,
-                    text: chunk
-                }
-            }
-        ]);
-
-
-        console.log(`Uploaded chunk ${i + 1}/${chunks.length}`);
+      console.log(`✅ Uploaded chunk ${i + 1}/${chunks.length}`);
+    } catch (err) {
+      console.error(`❌ Failed chunk ${i + 1}:`, err.message);
     }
+  }
+
+  console.log('🎉 All chunks processed.');
 }
 
+// 🚀 Run the upload
 embedAndUploadChunks(chunks, 'demo');
